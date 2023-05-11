@@ -3,7 +3,19 @@ package com.example.document.services
 import com.aspose.words.*
 import com.example.document.models.Employer
 import com.example.document.models.User
+import com.mongodb.client.MongoClients
+import com.mongodb.client.gridfs.GridFSBuckets
+import com.mongodb.client.gridfs.model.GridFSUploadOptions
+import com.mongodb.client.model.Filters
+import okhttp3.*
+import okhttp3.RequestBody.Companion.asRequestBody
+import org.bson.Document
+import org.springframework.core.io.InputStreamResource
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
+import java.io.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -12,6 +24,7 @@ class DocumentService {
 
     val pathTemplateFile:String = "C:\\Users\\DenielP\\IdeaProjects\\Document\\src\\main\\kotlin\\com\\example\\document\\templates\\temp.docx"
     val pathResFile:String = "C:\\Users\\DenielP\\IdeaProjects\\Document\\src\\main\\kotlin\\com\\example\\document\\templates\\new.docx"
+    val pathResFile2:String = "C:\\Users\\DenielP\\IdeaProjects\\Document\\src\\main\\kotlin\\com\\example\\document\\templates\\new2.docx"
 
     class Sender(val brigadirName: String, val taskId: String,
                  val listOfMembers: String, val taskDate: String?, val currentDate: String, val taskName: String?,
@@ -53,7 +66,7 @@ class DocumentService {
         return res
     }
 
-    fun tableGenerate(user: User, jobId: Int){
+    fun tableGenerate(user: User, jobId: Int): com.aspose.words.Document{
         var ind: Int = 1
         var ind2: Int = 1
         val doc = Document(pathResFile)
@@ -141,7 +154,7 @@ class DocumentService {
             }
         }
 
-        doc.save(pathResFile)
+        return doc
 
     }
 
@@ -155,13 +168,92 @@ class DocumentService {
         val localDate = LocalDate.now() //For reference
         val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
-        val doc = Document(pathTemplateFile)
+        val nameDoc: String = name.toString()+"_"+user.id.toString()
+
+        var doc = Document(pathTemplateFile)
         val sender = Sender(brName, id.toString(), members, date, localDate.format(formatter), name, costRub*100/100, "00")
         val engine = ReportingEngine()
         engine.buildReport(doc, sender, "s")
         doc.save(pathResFile)
-        tableGenerate(user, jobId)
+        doc = tableGenerate(user, jobId)
+        doc.save(pathResFile)
         println("Все сработало!")
+        val client = MongoClients.create("mongodb://localhost:27017/renovations")
+        val database = client.getDatabase("renovations")
+        val gridFSBucket = GridFSBuckets.create(database)//?
+
+        val stream = ByteArrayOutputStream()
+        doc.save(stream, SaveFormat.DOCX)
+
+        val bytes = stream.toByteArray()
+        val session = client.startSession()
+
+        val metaData = Document()
+        metaData.append("filename", "$nameDoc.docx")
+
+        val uploadOptions = GridFSUploadOptions()
+            .chunkSizeBytes(1024 * 1024)
+            .metadata(metaData)
+
+        gridFSBucket.uploadFromStream(session, nameDoc, ByteArrayInputStream(bytes), uploadOptions)
+        session.close()
+
+        File(pathResFile).delete()
+    }
+
+    fun getAllFileNames(userId: Int): MutableList<String>{
+        val client = MongoClients.create("mongodb://localhost:27017/renovations")
+        val database = client.getDatabase("renovations")
+        val gridFSBucket = GridFSBuckets.create(database)
+
+        val cursor = gridFSBucket.find()
+        val fileNames = mutableListOf<String>()
+
+        for (gridFSFile in cursor) {
+            val fileName = gridFSFile.filename
+            if (fileName.contains(userId.toString())) {
+                fileNames.add(fileName)
+            }
+        }
+        return fileNames
+    }
+
+    fun dowloadFile(fileName: String): ResponseEntity<ByteArray> {
+        val client = MongoClients.create("mongodb://localhost:27017/renovations")
+        val database = client.getDatabase("renovations")
+        val gridFSBucket = GridFSBuckets.create(database)
+        val filter = Filters.eq("filename", fileName)
+        val fileInfo = gridFSBucket.find(filter).first()
+        val fileId = fileInfo?.id
+        val downloadStream = fileId?.let { gridFSBucket.openDownloadStream(it) }
+        val outputStream = ByteArrayOutputStream()
+
+        downloadStream.use { input ->
+            outputStream.use { output ->
+                input?.copyTo(output)
+            }
+        }
+
+        val doc2 = Document(ByteArrayInputStream(outputStream.toByteArray()))
+        doc2.save(pathResFile2)
+        val response: ResponseEntity<ByteArray> = ResponseEntity(outputStream.toByteArray(), HttpStatus.OK)
+        val file = File(pathResFile2)
+        val inputStream = FileInputStream(file)
+        val inputStreamResource = InputStreamResource(inputStream)
+
+//        return ResponseEntity.ok()
+//            .contentType(MediaType("application/octet-stream"))
+//            .contentLength(file.length())
+//            .body()
+
+//        File(pathResFile2).delete()
+        return response
+//        val file = File(pathResFile2)
+//        val requestBody = MultipartBody.Builder()
+//            .setType(MultipartBody.FORM)
+//            .addFormDataPart("file", file.name, file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+//            .build()
+
 
     }
 

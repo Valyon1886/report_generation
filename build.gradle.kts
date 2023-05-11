@@ -18,6 +18,7 @@ repositories {
 
 dependencies {
     implementation("com.luhuiguo:aspose-words:23.1")
+    implementation("com.squareup.okhttp3:okhttp:4.9.3")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springframework.boot:spring-boot-starter-data-mongodb")
