@@ -8,15 +8,14 @@ import com.mongodb.client.gridfs.GridFSBuckets
 import com.mongodb.client.gridfs.model.GridFSUploadOptions
 import com.mongodb.client.model.Filters
 import okhttp3.*
-import okhttp3.RequestBody.Companion.asRequestBody
 import org.bson.Document
 import org.springframework.core.io.InputStreamResource
 import org.springframework.http.HttpStatus
-import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
 import java.io.*
 import java.time.LocalDate
+import java.time.Period
 import java.time.format.DateTimeFormatter
 
 @Service
@@ -26,9 +25,11 @@ class DocumentService {
     val pathResFile:String = "C:\\Users\\DenielP\\IdeaProjects\\Document\\src\\main\\kotlin\\com\\example\\document\\templates\\new.docx"
     val pathResFile2:String = "C:\\Users\\DenielP\\IdeaProjects\\Document\\src\\main\\kotlin\\com\\example\\document\\templates\\new2.docx"
 
+    var final_cost: Int = 0
+
     class Sender(val brigadirName: String, val taskId: String,
                  val listOfMembers: String, val taskDate: String?, val currentDate: String, val taskName: String?,
-                 val taskCostFull: Int?, val taskCostPer: String)
+                 val taskCostFull: Int?, val taskCostPer: String, val address: String)
 
     fun getFullName(user: User): String = user.lastName + " " + user.firstName + " " + user.secondName
 
@@ -45,10 +46,12 @@ class DocumentService {
     fun getMainCost(user: User, jobId: Int): Int{
         var res: Int = 0;
         val completedSubTasks = user.completedTasks?.get(jobId)?.completedSubTasks
+        val formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
         if (completedSubTasks != null) {
             for (i in completedSubTasks) {
+                val date_temp: Int = getDate(LocalDate.parse(i.beginDate, formatter), LocalDate.parse(i.endDate, formatter)) * 6
                 for (j in i.employers!!) {
-                    res+=j.cost*j.clock
+                    res+=j.cost*date_temp
                 }
                 for (j in i.materials!!){
                     res+= j.count!! * j.cost!!
@@ -72,12 +75,14 @@ class DocumentService {
         val doc = Document(pathResFile)
         val table1 = doc.getFirstSection().getBody().getTables().get(0)
         val table2 = doc.getFirstSection().getBody().getTables().get(1)
-
+        val localDate = LocalDate.now() //For reference
+        val formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+        //DateUtils.asString(new Date(), "yyyy-MM-dd")
         val completedSubTasks = user.completedTasks?.get(jobId)?.completedSubTasks
         if (completedSubTasks != null) {
             for (i in completedSubTasks.indices) {
                 val temp_employers: MutableList<Employer>? = completedSubTasks[i].employers
-
+                val date_temp: Int = getDate(LocalDate.parse(completedSubTasks[i].beginDate, formatter), LocalDate.parse(completedSubTasks[i].endDate, formatter)) * 6
                 if (temp_employers != null) {
                     for (k in temp_employers) {
                         table1.getRows().add(Row(doc))
@@ -101,7 +106,7 @@ class DocumentService {
                         table1.rows.get(ind2).getCells().add(Cell(doc))
                         table1.rows.get(ind2).cells.get(3).appendChild(Paragraph((doc)))
                         table1.rows.get(ind2).cells.get(3).getFirstParagraph().getRuns()  // clock of employer
-                                .add(Run(doc, k.clock.toString()))
+                                .add(Run(doc, date_temp.toString()))
                         
 
                         table1.rows.get(ind2).getCells().add(Cell(doc))
@@ -112,7 +117,7 @@ class DocumentService {
                         table1.rows.get(ind2).getCells().add(Cell(doc))
                         table1.rows.get(ind2).cells.get(5).appendChild(Paragraph((doc)))
                         table1.rows.get(ind2).cells.get(5).getFirstParagraph().getRuns()  // main cost
-                                .add(Run(doc, (k.clock*k.cost).toString()))
+                                .add(Run(doc, (date_temp*k.cost).toString()))
 
                         ind2++
                     }
@@ -158,20 +163,27 @@ class DocumentService {
 
     }
 
+    fun getDate(firstDate: LocalDate?, secondDate: LocalDate?): Int {
+        val period: Period = Period.between(firstDate, secondDate)
+        return (period.getYears() * 365 + period.getMonths()*30 + period.getDays())
+    }//30 * 6 * cost(зп час)
+
     fun docGenerate(user: User, jobId: Int){
         var brName: String = getFullName(user)
         var id: Long? = user.completedTasks?.get(jobId)?.id
         var members: String = getAllEmployers(user)
         var date: String? = user.completedTasks?.get(jobId)?.beginDate
+        var dateEnd: String? = user.completedTasks?.get(jobId)?.endDate
         var name: String? = user.completedTasks?.get(jobId)?.name
         var costRub: Int = getMainCost(user, jobId)
+        val address: String = user.completedTasks?.get(jobId)?.address.toString()
         val localDate = LocalDate.now() //For reference
         val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
         val nameDoc: String = name.toString()+"_"+user.id.toString()
 
         var doc = Document(pathTemplateFile)
-        val sender = Sender(brName, id.toString(), members, date, localDate.format(formatter), name, costRub*100/100, "00")
+        val sender = Sender(brName, id.toString(), members, date, localDate.format(formatter), name, costRub*100/100, "00", address)
         val engine = ReportingEngine()
         engine.buildReport(doc, sender, "s")
         doc.save(pathResFile)
